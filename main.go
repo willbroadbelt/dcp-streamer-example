@@ -18,13 +18,13 @@ type agents struct {
 
 var agnt agents
 
-//Note that the infinite DCP stream is limited to a 60s run below
+//Note that using the infinite DCP stream is limited to a 60s run below, this can be changed
 var infinite bool = true //T: Run one infinite DCP stream, or F: run repeated DCP streams (i.e. will not stream events that we've seen before)
 
 
 func main() {
 
-	hostname := "172.23.111.129"//"your-cluster-here"
+	hostname := "your-cluster-here"
 	port := 8091
 	useCollections := true
 
@@ -103,6 +103,8 @@ func main() {
 
 	time.Sleep(10 * time.Second)
 
+	//Do a document set operation to have an event to see in DCP
+	//A better option is to use a sample bucket to get a bunch of events
 	if err = CBSet(agent); err != nil {
 		fmt.Println("Got set error")
 		panic(err)
@@ -254,25 +256,26 @@ func SetupDcpEventHandler(so *DCPStreamObserver) {
 
 			fmt.Printf("(DCP) (%s) (vb %d) Creating DCP stream with start seqno %d, end seqno %d, vbuuid %d, snap start seqno %d, snap end seqno %d\n",
 				"default", en.VbID, gocbcore.SeqNo(so.lastSeqno[en.VbID]), en.SeqNo, fo[int(en.VbID)].VbUUID, so.snapshots[en.VbID].lastSnapStart, so.snapshots[en.VbID].lastSnapEnd)
+
 			var err error
 			var op gocbcore.PendingOp
+
 			if infinite {
 				//Infinite streamer - streams from the beginning to Seq number MaxInt so it will *never* complete
+				//Use this if you want to stream events for a long time and see everything
 				op, err = agnt.dcpAgent.OpenStream(en.VbID, memd.DcpStreamAddFlagActiveOnly, fo[int(en.VbID)].VbUUID, gocbcore.SeqNo(so.lastSeqno[en.VbID]), math.MaxInt64,
 					0, 0, so, gocbcore.OpenStreamOptions{}, func(entries []gocbcore.FailoverEntry, err error) {
 						ch <- err
 					},
 				)
 			} else {
-				//Incremental streamer - only receives new events that didnt occur in the last DCP streamer run
+				//Incremental streamer - only receives new events that didnt occur in the last DCP streamer run (the 'memory' is in the DCPStreamObserver)
 				op, err = agnt.dcpAgent.OpenStream(en.VbID, memd.DcpStreamAddFlagActiveOnly, fo[int(en.VbID)].VbUUID, gocbcore.SeqNo(so.snapshots[en.VbID].lastSnapEnd), en.SeqNo,
 					gocbcore.SeqNo(so.snapshots[en.VbID].lastSnapStart), gocbcore.SeqNo(so.snapshots[en.VbID].lastSnapEnd), so, gocbcore.OpenStreamOptions{}, func(entries []gocbcore.FailoverEntry, err error) {
 						ch <- err
 					},
 				)
 			}
-
-
 
 			if err != nil {
 				cancel()
